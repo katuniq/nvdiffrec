@@ -16,6 +16,8 @@ import numpy as np
 import torch
 import nvdiffrast.torch as dr
 import xatlas
+from torchmetrics.functional import structural_similarity_index_measure
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 # Import data readers / generators
 from dataset.dataset_mesh import DatasetMesh
@@ -226,12 +228,14 @@ def validate(glctx, geometry, opt_material, lgt, dataset_validate, out_dir, FLAG
     # ==============================================================================================
     mse_values = []
     psnr_values = []
+    ssim_values = []
+    lpips_values = []
 
     dataloader_validate = torch.utils.data.DataLoader(dataset_validate, batch_size=1, collate_fn=dataset_validate.collate)
 
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, 'metrics.txt'), 'w') as fout:
-        fout.write('ID, MSE, PSNR\n')
+        fout.write('ID, MSE, PSNR, SSIM, LPIPS\n')
 
         print("Running validation")
         for it, target in enumerate(dataloader_validate):
@@ -245,12 +249,23 @@ def validate(glctx, geometry, opt_material, lgt, dataset_validate, out_dir, FLAG
             opt = torch.clamp(result_dict['opt'], 0.0, 1.0) 
             ref = torch.clamp(result_dict['ref'], 0.0, 1.0)
 
+
             mse = torch.nn.functional.mse_loss(opt, ref, size_average=None, reduce=None, reduction='mean').item()
             mse_values.append(float(mse))
             psnr = util.mse_to_psnr(mse)
             psnr_values.append(float(psnr))
 
-            line = "%d, %1.8f, %1.8f\n" % (it, mse, psnr)
+            # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
+            opt = torch.moveaxis(opt, -1, 0)[None, ...]
+            ref = torch.moveaxis(ref, -1, 0)[None, ...]
+
+            ssim = structural_similarity_index_measure(opt, ref)
+            ssim_values.append(ssim)
+
+            lpips = LearnedPerceptualImagePatchSimilarity(normalize=True)(opt, ref)
+            lpips_values.append(lpips)
+
+            line = "%d, %1.8f, %1.8f\n" % (it, mse, psnr, ssim, lpips)
             fout.write(str(line))
 
             for k in result_dict.keys():
@@ -259,10 +274,12 @@ def validate(glctx, geometry, opt_material, lgt, dataset_validate, out_dir, FLAG
 
         avg_mse = np.mean(np.array(mse_values))
         avg_psnr = np.mean(np.array(psnr_values))
-        line = "AVERAGES: %1.4f, %2.3f\n" % (avg_mse, avg_psnr)
+        avg_ssim = np.mean(np.array(ssim_values))
+        avg_lpips = np.mean(np.array(lpips_values))
+        line = "AVERAGES: %1.4f, %2.3f, %2.3f, %2.3f\n" % (avg_mse, avg_psnr, avg_ssim, avg_lpips)
         fout.write(str(line))
-        print("MSE,      PSNR")
-        print("%1.8f, %2.3f" % (avg_mse, avg_psnr))
+        print("MSE,      PSNR,      SSIM,       LPIPS")
+        print("%1.8f, %2.3f, %2.3f, %2.3f" % (avg_mse, avg_psnr,  avg_ssim, avg_lpips))
     return avg_psnr
 
 ###############################################################################
