@@ -259,13 +259,14 @@ def validate(glctx, geometry, opt_material, lgt, dataset_validate, out_dir, FLAG
             opt = torch.moveaxis(opt, -1, 0)[None, ...]
             ref = torch.moveaxis(ref, -1, 0)[None, ...]
 
-            ssim = structural_similarity_index_measure(opt, ref)
+            ssim = structural_similarity_index_measure(opt, ref).detach().cpu().numpy()
             ssim_values.append(ssim)
 
-            lpips = LearnedPerceptualImagePatchSimilarity(normalize=True)(opt, ref)
+            lpips_metric = LearnedPerceptualImagePatchSimilarity(normalize=True).to('cuda')
+            lpips = lpips_metric(opt, ref).detach().cpu().numpy()
             lpips_values.append(lpips)
 
-            line = "%d, %1.8f, %1.8f\n" % (it, mse, psnr, ssim, lpips)
+            line = "%d, %1.8f, %1.8f, %2.6f, %2.6f\n" % (it, mse, psnr, ssim, lpips)
             fout.write(str(line))
 
             for k in result_dict.keys():
